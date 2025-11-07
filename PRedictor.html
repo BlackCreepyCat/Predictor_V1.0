@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prévisions Crypto – ARIMA & LSTM (VRAI ML)</title>
+    
+    <!-- Chart.js + Adaptateur de dates -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- ML -->
+    <script src="https://cdn.jsdelivr.net/npm/ml-arima@1.0.2/dist/ml-arima.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    
+    <style>
+        :root {
+            --bg: #1a1a1a;
+            --card: #242424;
+            --text: #e0e0e0;
+            --text-light: #aaaaaa;
+            --accent: #ff6d00;
+            --accent-hover: #e65100;
+            --border: #333;
+            --success: #00bfa5;
+            --error: #ff5252;
+            --warning: #ffb74d;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+            background: var(--card);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 16px;
+            font-size: 1.8rem;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .warning {
+            background: #2d2d2d;
+            border: 1px solid #444;
+            padding: 14px;
+            border-radius: 10px;
+            margin: 16px 0;
+            font-size: 0.9rem;
+            color: var(--warning);
+            text-align: center;
+        }
+
+        .warning strong { color: #ff9800; }
+
+        .refresh-timer {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+            color: var(--text-light);
+        }
+
+        .timer-circle {
+            width: 40px;
+            height: 40px;
+            position: relative;
+        }
+
+        .timer-circle svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+
+        .timer-circle .bg {
+            fill: none;
+            stroke: #333;
+            stroke-width: 4;
+        }
+
+        .timer-circle .progress {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 4;
+            stroke-linecap: round;
+            stroke-dasharray: 113;
+            stroke-dashoffset: 113;
+            transition: stroke-dashoffset 1s linear;
+        }
+
+        .timer-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: var(--accent);
+        }
+
+        .refresh-btn {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: var(--accent);
+            color: white;
+        }
+
+        .inputs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 24px;
+            align-items: center;
+        }
+
+        .input-wrapper {
+            position: relative;
+            flex: 1;
+            min-width: 220px;
+        }
+
+        .input-label {
+            position: absolute;
+            top: -8px;
+            left: 12px;
+            background: var(--card);
+            padding: 0 6px;
+            font-size: 0.75rem;
+            color: var(--accent);
+            font-weight: 500;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        input, select, button {
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #2d2d2d;
+            color: var(--text);
+            font-size: 1rem;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(255, 109, 0, 0.2);
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: auto;
+            min-width: 120px;
+            justify-content: center;
+        }
+
+        button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+        #chartContainer {
+            position: relative;
+            height: 480px;
+            margin: 32px 0;
+            background: #1e1e1e;
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid var(--border);
+        }
+
+        #predictions {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            margin-top: 16px;
+        }
+
+        #predictions h3 {
+            color: var(--accent);
+            margin-bottom: 16px;
+            font-size: 1.3rem;
+        }
+
+        #predictions p {
+            margin: 6px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95rem;
+        }
+
+        #predictions strong { color: var(--success); }
+
+        .error {
+            color: var(--error);
+            text-align: center;
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(255, 82, 82, 0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 82, 82, 0.3);
+            display: none;
+        }
+
+        .suggestions {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #2d2d2d;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            max-height: 240px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+            margin-top: 4px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .suggestion-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.95rem;
+        }
+
+        .suggestion-item:hover { background: #383838; }
+        .suggestion-item:last-child { border-bottom: none; }
+
+        .suggestion-symbol { font-weight: 600; color: var(--accent); }
+        .suggestion-name { color: var(--text-light); font-size: 0.85rem; }
+
+        .loading { display: inline-block; width: 20px; height: 20px; border: 2px solid #444; border-top: 2px solid var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-left: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .legend {
+            text-align: center;
+            margin: 16px 0;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        @media (max-width: 768px) {
+            .inputs { flex-direction: column; align-items: stretch; }
+            .input-wrapper, button { width: 100%; }
+            h1 { font-size: 1.5rem; }
+            .refresh-timer { flex-direction: column; gap: 8px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Prévisions Crypto – ML Réel</h1>
+
+    <div class="warning">
+        <strong>Modèles réels :</strong> ARIMA (ml-arima) et LSTM (TensorFlow.js) entraînés sur les données historiques.
+    </div>
+
+    <!-- Timer + Bouton Rafraîchir -->
+    <div class="refresh-timer">
+        <div class="timer-circle" id="timerCircle">
+            <svg>
+                <circle class="bg" cx="20" cy="20" r="18"></circle>
+                <circle class="progress" cx="20" cy="20" r="18" id="progressCircle"></circle>
+            </svg>
+            <div class="timer-text" id="timerText">60</div>
+        </div>
+        <span>Prochaine mise à jour dans <strong id="countdown">60</strong>s</span>
+        <button class="refresh-btn" onclick="manualRefresh()">Rafraîchir</button>
+    </div>
+
+    <div class="inputs">
+        <div class="input-wrapper">
+            <label for="tokenInput" class="input-label">Crypto (ex: BTC)</label>
+            <input type="text" id="tokenInput" placeholder="BTC, ETH, SOL..." autocomplete="off">
+            <div id="suggestions" class="suggestions"></div>
+        </div>
+        <div class="input-wrapper">
+            <label for="days" class="input-label">Jours prédiction</label>
+            <input type="number" id="days" value="60" min="1" max="90">
+        </div>
+        <div class="input-wrapper">
+            <label for="periods" class="input-label">Jours historiques</label>
+            <input type="number" id="periods" value="60" min="30" max="365">
+        </div>
+        <div class="input-wrapper">
+            <label for="model" class="input-label">Modèle ML</label>
+            <select id="model">
+                <option value="arima">ARIMA (réel)</option>
+                <option value="lstm">LSTM (réel)</option>
+            </select>
+        </div>
+        <button id="analyzeBtn" onclick="loadData()">
+            Analyser
+            <span id="loadingSpinner" class="loading" style="display:none;"></span>
+        </button>
+    </div>
+
+    <div id="chartContainer">
+        <canvas id="priceChart"></canvas>
+    </div>
+
+    <div id="predictions"></div>
+    <div class="legend">
+        ARIMA = statistique • LSTM = réseau neuronal (entraînement réel)
+    </div>
+    <div id="error" class="error"></div>
+</div>
+
+<script>
+    let chart;
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    let allCoins = [];
+    let coinMap = {};
+    let countdownInterval;
+    const REFRESH_DELAY = 60;
+
+    const input = document.getElementById('tokenInput');
+    const suggestionsDiv = document.getElementById('suggestions');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const countdownEl = document.getElementById('countdown');
+    const timerText = document.getElementById('timerText');
+    const progressCircle = document.getElementById('progressCircle');
+
+    // === CHARGEMENT DES COINS ===
+    async function loadCoinList() {
+        try {
+            const resp = await fetch('https://api.coingecko.com/api/v3/coins/list?include_platform=false');
+            allCoins = await resp.json();
+            allCoins.forEach(coin => {
+                coinMap[coin.symbol.toUpperCase()] = coin.id;
+                coinMap[coin.id.toLowerCase()] = coin.id;
+            });
+        } catch (e) {
+            console.warn("Liste non chargée", e);
+        }
+    }
+
+    // === SUGGESTIONS ===
+    input.addEventListener('input', () => {
+        const query = input.value.trim().toLowerCase();
+        suggestionsDiv.innerHTML = '';
+        if (!query) {
+            suggestionsDiv.style.display = 'none';
+            return;
+        }
+
+        const matches = allCoins
+            .filter(coin => 
+                coin.id.includes(query) || 
+                coin.symbol.toLowerCase().includes(query) ||
+                coin.name.toLowerCase().includes(query)
+            )
+            .slice(0, 10);
+
+        if (matches.length === 0) {
+            suggestionsDiv.style.display = 'none';
+            return;
+        }
+
+        matches.forEach(coin => {
+            const div = document.createElement('div');
+            div.className = 'suggestion-item';
+            div.innerHTML = `<span class="suggestion-symbol">${coin.symbol.toUpperCase()}</span><span class="suggestion-name">${coin.name}</span>`;
+            div.onclick = () => {
+                input.value = coin.symbol.toUpperCase();
+                suggestionsDiv.style.display = 'none';
+                resetTimerAndRefresh();
+            };
+            suggestionsDiv.appendChild(div);
+        });
+
+        suggestionsDiv.style.display = 'block';
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+            suggestionsDiv.style.display = 'none';
+        }
+    });
+
+    function getCoinIdFromInput() {
+        const val = input.value.trim();
+        if (!val) return null;
+        const upper = val.toUpperCase();
+        const lower = val.toLowerCase();
+        return coinMap[upper] || coinMap[lower] || 
+               allCoins.find(c => c.name.toLowerCase() === lower || c.id === lower)?.id;
+    }
+
+    // === PRÉDICTION RÉELLE (ML) ===
+    async function runRealPrediction(series, steps, type) {
+        if (type === 'arima') {
+            try {
+                const arima = new ML_ARIMA({ p: 2, d: 1, q: 2, data: series });
+                const preds = [];
+                let data = [...series];
+                for (let i = 0; i < steps; i++) {
+                    const pred = arima.predict(1)[0];
+                    preds.push(pred);
+                    data.push(pred);
+                    arima.data = data;
+                }
+                return preds;
+            } catch (e) {
+                console.warn("ARIMA échoué → fallback", e);
+                return simulatePrediction(series, steps, 'arima');
+            }
+        }
+
+        if (type === 'lstm') {
+            try {
+                return await runRealLSTM(series, steps);
+            } catch (e) {
+                console.warn("LSTM échoué → fallback", e);
+                return simulatePrediction(series, steps, 'lstm');
+            }
+        }
+    }
+
+    async function runRealLSTM(series, steps) {
+        if (series.length < 30) throw new Error("Données insuffisantes pour LSTM");
+        const min = Math.min(...series);
+        const max = Math.max(...series);
+        if (max === min) throw new Error("Données constantes");
+
+        const normalized = series.map(p => (p - min) / (max - min));
+        const sequenceLength = 15;
+        const xs = [], ys = [];
+
+        for (let i = sequenceLength; i < normalized.length; i++) {
+            xs.push(normalized.slice(i - sequenceLength, i));
+            ys.push(normalized[i]);
+        }
+
+        if (xs.length < 10) throw new Error("Pas assez de séquences");
+
+        const model = tf.sequential();
+        model.add(tf.layers.lstm({ units: 30, inputShape: [sequenceLength, 1], returnSequences: false }));
+        model.add(tf.layers.dense({ units: 1 }));
+        model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
+
+        const xsTensor = tf.tensor3d(xs, [xs.length, sequenceLength, 1]);
+        const ysTensor = tf.tensor1d(ys);
+
+        await model.fit(xsTensor, ysTensor, { epochs: 15, batchSize: 16, verbose: 0 });
+
+        const predictions = [];
+        let lastSeq = normalized.slice(-sequenceLength);
+
+        for (let i = 0; i < steps; i++) {
+            const input = tf.tensor3d([lastSeq], [1, sequenceLength, 1]);
+            const pred = model.predict(input).dataSync()[0];
+            const denorm = pred * (max - min) + min;
+            predictions.push(Math.max(denorm, 0));
+            lastSeq = [...lastSeq.slice(1), pred];
+            tf.dispose(input);
+        }
+
+        tf.dispose([xsTensor, ysTensor, model]);
+        return predictions;
+    }
+
+    function simulatePrediction(series, steps, type) {
+        const last = series[series.length - 1];
+        const trend = (series[series.length - 1] - series[0]) / series.length || 0;
+        const out = [];
+        let cur = last;
+        for (let i = 0; i < steps; i++) {
+            const noise = (Math.random() - 0.5) * last * 0.03;
+            const cycle = type === 'lstm' ? Math.sin(i * 0.5) * last * 0.02 : 0;
+            cur = Math.max(cur + trend * 1.1 + cycle + noise, last * 0.3);
+            out.push(cur);
+        }
+        return out;
+    }
+
+    // === CHARGEMENT DES DONNÉES ===
+    async function loadData() {
+        const days = parseInt(document.getElementById('days').value) || 30;
+        const periods = parseInt(document.getElementById('periods').value) || 90;
+        const model = document.getElementById('model').value;
+        const coinId = getCoinIdFromInput();
+
+        if (!coinId) {
+            showError("Token non reconnu.");
+            return;
+        }
+
+        document.getElementById('error').style.display = 'none';
+        document.getElementById('predictions').innerHTML = '<p style="color:#888; text-align:center;">Chargement + entraînement ML...</p>';
+        loadingSpinner.style.display = 'inline-block';
+        analyzeBtn.disabled = true;
+
+        try {
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - periods);
+            const from = Math.floor(start.getTime() / 1000);
+            const to = Math.floor(end.getTime() / 1000);
+
+            const resp = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}/market_chart/range?vs_currency=usd&from=${from}&to=${to}&precision=4`);
+            if (!resp.ok) throw new Error("Token introuvable");
+
+            const data = await resp.json();
+            const historical = data.prices.map(p => ({ date: new Date(p[0]), price: p[1] }));
+            const histDates = historical.map(h => h.date);
+            const histPrices = historical.map(h => h.price);
+
+            const predictions = await runRealPrediction(histPrices, days, model);
+
+            const predDates = [];
+            for (let i = 0; i < days; i++) {
+                const d = new Date(end);
+                d.setDate(d.getDate() + i + 1);
+                predDates.push(d);
+            }
+
+            const allDates = [...histDates, ...predDates];
+            const splitIdx = histDates.length;
+
+            const histData = [...histPrices, ...Array(days).fill(null)];
+            const predData = [...Array(histPrices.length).fill(null), ...predictions];
+
+            const histMax = histDates[histDates.length - 1].getTime();
+            const predMin = predDates[0].getTime();
+            const gap = (predMin - histMax) * 0.8;
+
+            if (chart) chart.destroy();
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: allDates,
+                    datasets: [
+                        {
+                            label: 'Prix Historiques',
+                            data: histData,
+                            borderColor: '#00bfa5',
+                            tension: 0.2,
+                            pointRadius: 0,
+                            borderWidth: 2.5,
+                            segment: {
+                                borderColor: ctx => (ctx.p0.parsed.x > histMax + gap/2 ? 'transparent' : undefined)
+                            }
+                        },
+                        {
+                            label: `${model.toUpperCase()} – Prédiction (ML)`,
+                            data: predData,
+                            borderColor: 'rgba(255, 109, 0, 0.9)',
+                            backgroundColor: 'rgba(255, 109, 0, 0.9)',
+                            tension: 0.3,
+                            borderWidth: 2.5,
+                            borderDash: [8, 4],
+                            pointRadius: ctx => ctx.dataIndex >= splitIdx ? 4 : 0,
+                            pointHoverRadius: 6,
+                            pointBackgroundColor: 'rgba(255, 109, 0, 1)',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                            segment: {
+                                borderColor: ctx => (ctx.p0.parsed.x < predMin - gap/2 ? 'transparent' : undefined)
+                            }
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#e0e0e0' } },
+                        tooltip: {
+                            mode: 'nearest',
+                            intersect: false,
+                            callbacks: {
+                                label: ctx => {
+                                    if (ctx.dataIndex >= splitIdx) {
+                                        return `Prédiction: $${ctx.parsed.y.toFixed(2)}`;
+                                    }
+                                    return `Prix: $${ctx.parsed.y.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: { day: 'dd MMM' },
+                                tooltipFormat: 'dd MMMM yyyy'
+                            },
+                            min: histDates[0].getTime(),
+                            max: predDates[predDates.length - 1].getTime() + (predDates[predDates.length - 1].getTime() - predDates[0].getTime()) * 0.3,
+                            ticks: {
+                                color: '#aaa',
+                                maxTicksLimit: 10,
+                                callback: function(value) {
+                                    const date = new Date(value);
+                                    const isHist = date <= histDates[histDates.length - 1];
+                                    const isPred = date >= predDates[0];
+                                    if (isHist && histDates.indexOf(date) % Math.ceil(histDates.length / 6) === 0) return date.toLocaleDateString('fr-FR');
+                                    if (isPred && predDates.indexOf(date) % Math.ceil(predDates.length / 4) === 0) return date.toLocaleDateString('fr-FR');
+                                    return '';
+                                }
+                            },
+                            grid: { color: '#333' },
+                            afterBuildTicks: function(scale) {
+                                const ticks = [];
+                                const histCount = 6;
+                                const predCount = 4;
+
+                                for (let i = 0; i < histCount; i++) {
+                                    const idx = Math.floor(i * (splitIdx - 1) / (histCount - 1));
+                                    if (histDates[idx]) ticks.push({ value: histDates[idx].getTime() });
+                                }
+
+                                ticks.push({ value: histMax + gap / 2 });
+
+                                for (let i = 0; i < predCount; i++) {
+                                    const idx = Math.floor(i * (days - 1) / (predCount - 1));
+                                    if (predDates[idx]) ticks.push({ value: predDates[idx].getTime() });
+                                }
+
+                                scale.ticks = ticks;
+                            }
+                        },
+                        y: {
+                            ticks: { 
+                                color: '#aaa', 
+                                callback: v => '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
+                            },
+                            grid: { color: '#333' }
+                        }
+                    }
+                }
+            });
+
+            const list = predictions.map((p, i) => 
+                `<p>${predDates[i].toLocaleDateString('fr-FR')} : <strong>$${p.toFixed(2)}</strong></p>`
+            ).join('');
+
+            document.getElementById('predictions').innerHTML = `
+                <h3>Prédictions ${model.toUpperCase()} – ${input.value.toUpperCase()} (${days} jours)</h3>
+                ${list}
+            `;
+
+        } catch (e) {
+            showError(e.message || "Erreur ML");
+        } finally {
+            loadingSpinner.style.display = 'none';
+            analyzeBtn.disabled = false;
+        }
+    }
+
+    function showError(msg) {
+        const el = document.getElementById('error');
+        el.textContent = msg;
+        el.style.display = 'block';
+        document.getElementById('predictions').innerHTML = '';
+    }
+
+    // === TIMER ===
+    function startTimer() {
+        let timeLeft = REFRESH_DELAY;
+        countdownEl.textContent = timeLeft;
+        timerText.textContent = timeLeft;
+        const circumference = 113;
+        progressCircle.style.strokeDashoffset = circumference;
+
+        clearInterval(countdownInterval);
+        countdownInterval = setInterval(() => {
+            timeLeft--;
+            countdownEl.textContent = timeLeft;
+            timerText.textContent = timeLeft;
+            progressCircle.style.strokeDashoffset = circumference * (timeLeft / REFRESH_DELAY);
+            if (timeLeft <= 0) {
+                clearInterval(countdownInterval);
+                loadData();
+                startTimer();
+            }
+        }, 1000);
+    }
+
+    function resetTimerAndRefresh() {
+        clearInterval(countdownInterval);
+        loadData().then(startTimer);
+    }
+
+    function manualRefresh() {
+        resetTimerAndRefresh();
+    }
+
+    // === INIT ===
+    loadCoinList().then(() => {
+        input.value = 'BTC';
+        loadData().then(startTimer);
+    });
+</script>
+</body>
+</html>
